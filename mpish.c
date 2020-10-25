@@ -17,7 +17,7 @@ int handleCommand(int flag, char* fileName, int pNum);
 
 
 int main(void) {
-  char command[1024];
+  char command[1000];
   int my_rank, comm_sz, flag;
   int thread = 1;
   wordexp_t p;
@@ -62,12 +62,14 @@ int main(void) {
         //printf("exit cmp: %d - %s\n",strcmp(w[0], "exit"), w[0]);
         if(strcmp(w[0], "put") == 0) {
           //printf("put\n");
-          if(p.we_wordc == 2) {
+          if(p.we_wordc == 2 || p.we_wordc == 3) {
 
             //char* fileContents;
-            char fileContents[MAX_STRING];
+            //unsigned char fileContents[MAX_STRING];
+            unsigned char* fileContents = malloc(sizeof(unsigned char)*MAX_STRING);
             int fileSize = 0;
             int readSize = 0;
+            int currentThread = 1;
             FILE *fp;
 
             if(strlen(w[1]) < 4){
@@ -82,44 +84,68 @@ int main(void) {
               fp = fopen(w[1], "r");
             }
 
-            //fp = fopen(w[1], "r");
+            if(p.we_wordc == 3) {
+              currentThread = atoi(w[2]);
+            }
+            else {
+              int whereExists = -1;
+              for(int i = 1; i < comm_sz; i++) {
+                  MPI_Send(w[0], strlen(w[0] + 1), MPI_CHAR, i, 4, MPI_COMM_WORLD);
+              }
+              for(int i = 1; i < comm_sz; i++) {
+                char* tempRecv = malloc(sizeof(char)*MAX_STRING);
+                printf("p%d\n", i);
+                MPI_Recv(tempRecv, MAX_STRING, MPI_CHAR, i, 4, MPI_COMM_WORLD, &status);
 
-            MPI_Send(w[1], strlen(w[1])+1, MPI_CHAR, thread, 1, MPI_COMM_WORLD);
+                char* token;
+                token = strtok(tempRecv, "\n");
+                while(token != NULL) {
+                  printf(" %s\n",token);
+                  if(strcmp(token,w[1]) == 0) {
+                    if(whereExists == -1) {
+                      currentThread = i;
+                      whereExists = i;
+                    }
+                  }
+                  token = strtok(NULL, "\n");
+                }
 
-            while(fgets(fileContents, MAX_STRING, fp)) {
-              printf("bin file before: %s\n",fileContents);
-              MPI_Send(fileContents, strlen(fileContents)+1, MPI_CHAR, thread, 1, MPI_COMM_WORLD);
+                //printf(" %s",tempRecv);
+                free(tempRecv);
+              }
+              if(whereExists == -1) {
+                currentThread = thread;
+              }
             }
 
-            MPI_Send(fileContents, strlen(fileContents)+1, MPI_CHAR, thread, 0, MPI_COMM_WORLD);
+            //fp = fopen(w[1], "r");
+            printf("Thread going into: %d\n",currentThread);
+            MPI_Send(w[1], strlen(w[1])+1, MPI_CHAR, currentThread, 1, MPI_COMM_WORLD);
 
-            /*if(fp != NULL) {
-              fseek(fp, 0, SEEK_END);
-              fileSize = ftell(fp);
-              rewind(fp);
-              fileContents = (char*) malloc(sizeof(char)*(fileSize+1));
-              readSize = fread(fileContents, sizeof(char), fileSize, fp);
+            if(fp != NULL) {
+              while(fread(fileContents, sizeof(fileContents), 1, fp) > 0) {
+                //fileContents[buffSize] = '\0';
+                MPI_Send(fileContents, sizeof(fileContents)+1, MPI_UNSIGNED_CHAR, currentThread, 1, MPI_COMM_WORLD);
+              }
+            }
 
-              fileContents[fileSize] = '\0';
 
-            }*/
+            MPI_Send(fileContents, strlen(fileContents)+1, MPI_UNSIGNED_CHAR, currentThread, 0, MPI_COMM_WORLD);
 
             fclose(fp);
 
+            //printf("fileContents: %s\n",fileContents);
 
-            printf("fileContents: %s\n",fileContents);
-
-
-
-            if(thread + 1 >= comm_sz) {
-              thread = 1;
+            if(p.we_wordc == 2) {
+              if(thread + 1 >= comm_sz) {
+                thread = 1;
+              }
+              else {
+                thread++;
+              }
             }
-            else {
-              thread++;
-            }
 
-          }
-          else if(p.we_wordc == 3) {
+            free(fileContents);
 
           }
           else {
@@ -128,17 +154,101 @@ int main(void) {
         }
         else if(strcmp(w[0], "get") == 0) {
           if(p.we_wordc == 2) {
+            int whereExists = -1;
+            for(int i = 1; i < comm_sz; i++) {
+                MPI_Send(w[0], strlen(w[0] + 1), MPI_CHAR, i, 4, MPI_COMM_WORLD);
+            }
+            for(int i = 1; i < comm_sz; i++) {
+              char* tempRecv = malloc(sizeof(char)*MAX_STRING);
+              printf("p%d\n", i);
+              MPI_Recv(tempRecv, MAX_STRING, MPI_CHAR, i, 4, MPI_COMM_WORLD, &status);
 
+              char* token;
+              token = strtok(tempRecv, "\n");
+              while(token != NULL) {
+                printf(" %s\n",token);
+                if(strcmp(token,w[1]) == 0) {
+                  if(whereExists == -1) {
+                    whereExists = i;
+                  }
+                }
+                token = strtok(NULL, "\n");
+              }
+
+              //printf(" %s",tempRecv);
+              free(tempRecv);
+            }
+            if(whereExists > 0) {
+              char tempFN[MAX_STRING];
+              MPI_Status status;
+              FILE *fp;
+
+
+              MPI_Send(w[1], strlen(w[1])+1, MPI_CHAR, whereExists, 3, MPI_COMM_WORLD);
+
+              MPI_Recv(tempFN, MAX_STRING, MPI_CHAR, whereExists, 3, MPI_COMM_WORLD, &status);
+
+
+
+              if(strlen(tempFN) < 4){
+                fp = fopen(tempFN, "w");
+              }
+              else if(tempFN[strlen(tempFN) - 1] == 'n' && tempFN[strlen(tempFN) - 2] == 'i' && tempFN[strlen(tempFN) - 3] == 'b' && tempFN[strlen(tempFN) - 4] == '.' ) {
+                fp = fopen(tempFN, "wb");
+                printf("File is binary (write)\n");
+              }
+              else {
+                printf("File is normal - %s [ %c ]\n", tempFN, tempFN[strlen(tempFN)-1]);
+                fp = fopen(tempFN, "w");
+              }
+
+
+
+
+              int strEnd = 0;
+              while(strEnd == 0) {
+                unsigned char* fileContents = malloc(sizeof(unsigned char)*MAX_STRING);
+                MPI_Recv(fileContents, MAX_STRING, MPI_UNSIGNED_CHAR, whereExists, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+
+                if(status.MPI_TAG == 0) {
+                  strEnd = 1;
+                  break;
+                }
+                else {
+                  fwrite(fileContents, sizeof(fileContents), 1, fp);
+                }
+                free(fileContents);
+              }
+              fclose(fp);
+            }
+            else {
+              printf("No file exists\n");
+            }
           }
           else {
             printf("Invalid number of parameters\n");
           }
         }
         else if(strcmp(w[0], "ls") == 0) {
+
           if(p.we_wordc == 1) {
             for(int i = 1; i < comm_sz; i++) {
               MPI_Send(w[0], strlen(w[0] + 1), MPI_CHAR, i, 4, MPI_COMM_WORLD);
-              //MPI_Recv()
+            }
+            for(int i = 1; i < comm_sz; i++) {
+              char* tempRecv = malloc(sizeof(char)*MAX_STRING);
+              printf("p%d\n", i);
+              MPI_Recv(tempRecv, MAX_STRING, MPI_CHAR, i, 4, MPI_COMM_WORLD, &status);
+
+              char* token;
+              token = strtok(tempRecv, "\n");
+              while(token != NULL) {
+                printf(" %s\n",token);
+                token = strtok(NULL, "\n");
+              }
+
+              //printf(" %s",tempRecv);
+              free(tempRecv);
             }
           }
           else {
@@ -197,7 +307,6 @@ int main(void) {
       //printf("Look here: \n");
       MPI_Recv(command, MAX_STRING, MPI_CHAR, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
       //printf("here: %s from %d with tag: %d\n",command, my_rank, status.MPI_TAG);
-
       resp = handleCommand(status.MPI_TAG, command, my_rank);
       if(resp == 0){
         printf("Exiting %d\n", my_rank);
@@ -225,7 +334,7 @@ int handleCommand(int flag, char* fileName, int pNum) {
     printf("put <filename>\n");
     char tempFN[1024];
     char tempNum[1024];
-    char fileContents[1024];
+    //unsigned char fileContents[1024];
     FILE *fp;
 
     sprintf(tempNum, "%d", pNum);
@@ -251,15 +360,18 @@ int handleCommand(int flag, char* fileName, int pNum) {
     int strEnd = 0;
     while(strEnd == 0) {
       //printf("above\n");
-      MPI_Recv(fileContents, MAX_STRING, MPI_CHAR, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+      unsigned char* fileContents = malloc(sizeof(unsigned char)*MAX_STRING);
+      MPI_Recv(fileContents, MAX_STRING, MPI_UNSIGNED_CHAR, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
       //printf("fC: %s - %d\n",fileContents, status.MPI_TAG);
       if(status.MPI_TAG == 0) {
         strEnd = 1;
         break;
       }
       else {
-        fputs(fileContents, fp);
+        fwrite(fileContents, sizeof(fileContents), 1, fp);
+        //fputs(fileContents, fp);
       }
+      free(fileContents);
     }
 
 
@@ -273,20 +385,75 @@ int handleCommand(int flag, char* fileName, int pNum) {
   }
   //put <filename> #
   else if(flag == 2) {
-
+    //# is handled in 0 to choose the process, therefore this is obsolete
   }
   //get <filename>
   else if(flag == 3) {
+    unsigned char* fileContents = malloc(sizeof(unsigned char)*MAX_STRING);
+    char tempFN[1024];
+    char tempNum[1024];
 
+    FILE *fp;
+
+    sprintf(tempNum, "%d", pNum);
+
+    strcpy(tempFN, "p");
+    strcat(tempFN, tempNum);
+    strcat(tempFN, "/");
+    strcat(tempFN, fileName);
+
+    printf("tempFN: %s\n",&tempFN);
+
+    if(strlen(tempFN) < 4){
+      fp = fopen(tempFN, "r");
+    }
+    else if(tempFN[strlen(tempFN) - 1] == 'n' && tempFN[strlen(tempFN) - 2] == 'i' && tempFN[strlen(tempFN) - 3] == 'b' && tempFN[strlen(tempFN) - 4] == '.' ) {
+      fp = fopen(tempFN, "rb");
+      printf("File is binary (read)\n");
+    }
+    else {
+      printf("File is normal - %s [ %c ]\n", tempFN, tempFN[strlen(tempFN)-1]);
+      fp = fopen(tempFN, "r");
+    }
+
+    MPI_Send(fileName, strlen(tempFN)+1, MPI_CHAR, 0, 3, MPI_COMM_WORLD);
+
+    if(fp != NULL) {
+      while(fread(fileContents, sizeof(fileContents), 1, fp) > 0) {
+        MPI_Send(fileContents, sizeof(fileContents)+1, MPI_UNSIGNED_CHAR, 0, 1, MPI_COMM_WORLD);
+      }
+    }
+
+    MPI_Send(fileContents, strlen(fileContents)+1, MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD);
+    printf("fC: %s\n",fileContents);
+
+    free(fileContents);
+    fclose(fp);
+    return 1;
   }
   //ls
   else if(flag == 4) {
-    char tempLS[1024];
+
+    char tempLS[MAX_STRING];
+    char buffer[MAX_STRING];
+    char* ret = malloc(sizeof(char)*MAX_STRING);
+    strcpy(ret,"\0");
+
     sprintf(tempLS, "ls p%d", pNum);
+    FILE *command = popen(tempLS, "r");
+
+    while(fgets(buffer, sizeof(buffer), command) != NULL) {
+      strcat(ret, buffer);
+    }
+    pclose(command);
+
+    MPI_Send(ret, strlen(ret)+1, MPI_CHAR, 0, 4, MPI_COMM_WORLD);
+
+    free(ret);
 
     //strcpy(tempLS, "ls ");
     //strcat(tempLS, tempPNum);
-    system(tempLS);
+    //system(tempLS);
     return 1;
   }
   //exit
@@ -299,12 +466,7 @@ int handleCommand(int flag, char* fileName, int pNum) {
   }
   //lrm <filename>
   else if(flag == 7) {
-    char tempCommand[1024];
-
-    strcpy(tempCommand, "rm ");
-    strcat(tempCommand, fileName);
-
-    system(tempCommand);
+    //lrm doesn't use MPI as it's on our own system
   }
   else {
 
